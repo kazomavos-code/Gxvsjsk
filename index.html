@@ -3,36 +3,52 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Large TXT Duplicate Remover</title>
+<title>URL Filter + Duplicate Remover</title>
 <style>
 body{margin:0;min-height:100vh;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:20px}
-.box{max-width:700px;margin:auto;background:#111827;padding:24px;border-radius:18px;box-shadow:0 0 25px rgba(0,0,0,.35)}
+.box{max-width:780px;margin:auto;background:#111827;padding:24px;border-radius:18px;box-shadow:0 0 25px rgba(0,0,0,.35)}
 h1{text-align:center;margin-top:0}
-label.upload{display:block;padding:24px;border-radius:14px;background:#2563eb;text-align:center;font-weight:bold;font-size:18px;cursor:pointer}
+label{display:block;margin-top:14px;margin-bottom:8px;font-weight:bold}
+.upload{display:block;padding:22px;border-radius:14px;background:#2563eb;text-align:center;font-weight:bold;font-size:18px;cursor:pointer;margin-top:10px}
 input[type=file]{display:none}
-button{width:100%;padding:16px;border:0;border-radius:12px;background:#2563eb;color:white;font-weight:bold;font-size:17px;margin-top:12px;cursor:pointer}
+input[type=text]{width:100%;padding:14px;border:0;border-radius:12px;background:#1e293b;color:white;font-size:16px}
+button{width:100%;padding:15px;border:0;border-radius:12px;background:#2563eb;color:white;font-weight:bold;font-size:17px;margin-top:12px;cursor:pointer}
 button:disabled{opacity:.5}
 .info{margin-top:16px;background:#1e293b;padding:14px;border-radius:12px;line-height:1.6}
 progress{width:100%;height:22px;margin-top:16px}
 .small{font-size:13px;opacity:.75;margin-top:14px;line-height:1.5}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row button{flex:1;min-width:160px}
+.mode{background:#1e293b;padding:12px;border-radius:12px;margin-top:12px}
+.mode label{font-weight:normal;margin:8px 0}
 </style>
 </head>
 <body>
 <div class="box">
-  <h1>Large TXT Duplicate Remover</h1>
+  <h1>URL Filter + Duplicate Remover</h1>
 
   <label class="upload" for="fileInput">UPLOAD TXT FILE</label>
   <input id="fileInput" type="file" accept=".txt,text/plain">
 
-  <button id="startBtn" onclick="startClean()">Remove Duplicate</button>
-  <button id="downloadBtn" onclick="downloadResult()" disabled>Download TXT</button>
+  <label>Filter URL / Domain</label>
+  <input id="keyword" type="text" placeholder="Contoh: eldorado.gg, roblox.com, paypal.com">
+
+  <div class="mode">
+    <label><input type="checkbox" id="useFilter" checked> Pakai filter domain/URL</label>
+    <label><input type="checkbox" id="removeDuplicate" checked> Hapus duplikat hasil</label>
+  </div>
+
+  <div class="row">
+    <button id="processBtn" onclick="startProcess()">Proses</button>
+    <button id="downloadBtn" onclick="downloadResult()" disabled>Download Hasil</button>
+  </div>
 
   <progress id="progress" value="0" max="100"></progress>
   <div class="info" id="info">Belum ada file.</div>
 
   <div class="small">
-    Versi ini tidak upload ke API Vercel, jadi tidak kena error FUNCTION_PAYLOAD_TOO_LARGE.
-    Proses dilakukan di Web Worker supaya browser tidak freeze/lag berat.
+    Bisa dipakai untuk: filter domain tertentu + remove duplicate, atau remove duplicate saja.
+    Tidak pakai API Vercel, jadi tidak kena FUNCTION_PAYLOAD_TOO_LARGE.
   </div>
 </div>
 
@@ -43,15 +59,47 @@ let worker = null;
 const workerCode = `
 self.onmessage = async function(e){
   const file = e.data.file;
+  const keyword = (e.data.keyword || "").toLowerCase().trim();
+  const useFilter = e.data.useFilter;
+  const removeDuplicate = e.data.removeDuplicate;
+
   const totalSize = file.size;
   const decoder = new TextDecoder("utf-8");
   const reader = file.stream().getReader();
 
-  const seen = new Set();
   const output = [];
+  const seen = new Set();
+
   let leftover = "";
   let bytesRead = 0;
   let totalLines = 0;
+  let matchedLines = 0;
+  let writtenLines = 0;
+  let duplicateRemoved = 0;
+
+  function handleLine(raw){
+    const line = raw.trim();
+    if(line === "") return;
+
+    totalLines++;
+
+    if(useFilter && keyword && !line.toLowerCase().includes(keyword)){
+      return;
+    }
+
+    matchedLines++;
+
+    if(removeDuplicate){
+      if(seen.has(line)){
+        duplicateRemoved++;
+        return;
+      }
+      seen.add(line);
+    }
+
+    output.push(line);
+    writtenLines++;
+  }
 
   while(true){
     const {done, value} = await reader.read();
@@ -60,6 +108,145 @@ self.onmessage = async function(e){
     bytesRead += value.byteLength;
     const chunkText = decoder.decode(value, {stream:true});
     const combined = leftover + chunkText;
+    const parts = combined.split(/\\r?\\n/);
+    leftover = parts.pop() || "";
+
+    for(const raw of parts){
+      handleLine(raw);
+    }
+
+    self.postMessage({
+      type:"progress",
+      progress: Math.floor((bytesRead / totalSize) * 100),
+      totalLines,
+      matchedLines,
+      writtenLines,
+      duplicateRemoved
+    });
+  }
+
+  if(leftover.trim() !== ""){
+    handleLine(leftover);
+  }
+
+  const result = output.join("\\n");
+  const blob = new Blob([result], {type:"text/plain;charset=utf-8"});
+
+  self.postMessage({
+    type:"done",
+    blob,
+    totalLines,
+    matchedLines,
+    writtenLines,
+    duplicateRemoved
+  });
+};
+`;
+
+function makeWorker(){
+  const blob = new Blob([workerCode], {type:"application/javascript"});
+  const url = URL.createObjectURL(blob);
+  return new Worker(url);
+}
+
+document.getElementById("fileInput").addEventListener("change", function(){
+  const file = this.files[0];
+  if(file){
+    document.getElementById("info").innerHTML =
+      "File dipilih: <b>" + file.name + "</b><br>Ukuran: " + formatBytes(file.size);
+    document.getElementById("progress").value = 0;
+    document.getElementById("downloadBtn").disabled = true;
+  }
+});
+
+function startProcess(){
+  const file = document.getElementById("fileInput").files[0];
+  const keyword = document.getElementById("keyword").value.trim();
+  const useFilter = document.getElementById("useFilter").checked;
+  const removeDuplicate = document.getElementById("removeDuplicate").checked;
+
+  if(!file){
+    alert("Pilih file TXT dulu.");
+    return;
+  }
+
+  if(useFilter && !keyword){
+    alert("Isi filter URL/domain dulu, atau matikan centang Pakai filter domain/URL.");
+    return;
+  }
+
+  if(resultBlobUrl){
+    URL.revokeObjectURL(resultBlobUrl);
+    resultBlobUrl = null;
+  }
+
+  document.getElementById("processBtn").disabled = true;
+  document.getElementById("downloadBtn").disabled = true;
+  document.getElementById("info").innerHTML = "Memproses... jangan tutup halaman.";
+
+  worker = makeWorker();
+
+  worker.onmessage = function(e){
+    const data = e.data;
+
+    if(data.type === "progress"){
+      document.getElementById("progress").value = data.progress;
+      document.getElementById("info").innerHTML =
+        "Progress: <b>" + data.progress + "%</b><br>" +
+        "Baris terbaca: <b>" + data.totalLines + "</b><br>" +
+        "Cocok filter: <b>" + data.matchedLines + "</b><br>" +
+        "Hasil ditulis: <b>" + data.writtenLines + "</b><br>" +
+        "Duplikat terhapus: <b>" + data.duplicateRemoved + "</b>";
+    }
+
+    if(data.type === "done"){
+      resultBlobUrl = URL.createObjectURL(data.blob);
+      document.getElementById("progress").value = 100;
+      document.getElementById("info").innerHTML =
+        "Selesai!<br>" +
+        "Total baris: <b>" + data.totalLines + "</b><br>" +
+        "Cocok filter: <b>" + data.matchedLines + "</b><br>" +
+        "Hasil akhir: <b>" + data.writtenLines + "</b><br>" +
+        "Duplikat terhapus: <b>" + data.duplicateRemoved + "</b><br>" +
+        "Klik Download Hasil.";
+      document.getElementById("downloadBtn").disabled = false;
+      document.getElementById("processBtn").disabled = false;
+      worker.terminate();
+    }
+  };
+
+  worker.onerror = function(err){
+    document.getElementById("info").innerHTML = "Error: " + err.message;
+    document.getElementById("processBtn").disabled = false;
+  };
+
+  worker.postMessage({file, keyword, useFilter, removeDuplicate});
+}
+
+function downloadResult(){
+  if(!resultBlobUrl){
+    alert("Belum ada hasil.");
+    return;
+  }
+
+  const keyword = document.getElementById("keyword").value.trim().replace(/[^a-z0-9._-]/gi, "_") || "result";
+  const a = document.createElement("a");
+  a.href = resultBlobUrl;
+  a.download = "filtered-dedup-" + keyword + ".txt";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function formatBytes(bytes){
+  if(bytes < 1024) return bytes + " B";
+  if(bytes < 1024*1024) return (bytes/1024).toFixed(2) + " KB";
+  if(bytes < 1024*1024*1024) return (bytes/1024/1024).toFixed(2) + " MB";
+  return (bytes/1024/1024/1024).toFixed(2) + " GB";
+}
+</script>
+</body>
+</html>
     const parts = combined.split(/\\r?\\n/);
     leftover = parts.pop() || "";
 
