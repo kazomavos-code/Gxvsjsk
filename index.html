@@ -1,39 +1,41 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>URL Filter + Duplicate Remover</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>URL Filter + Duplicate Remover</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>URL Filter + Duplicate Remover</h1>
 
-<style>
-body{
-  margin:0;
-  padding:20px;
-  background:#071226;
-  font-family:Arial,sans-serif;
-  color:white;
-}
+    <label class="upload-btn" for="fileInput">UPLOAD TXT FILE</label>
+    <input type="file" id="fileInput" accept=".txt,text/plain">
 
-.container{
-  max-width:850px;
-  margin:auto;
-  background:#0f172a;
-  border-radius:20px;
-  padding:25px;
-  box-shadow:0 0 30px rgba(0,0,0,.4);
-}
+    <label class="label">Filter URL / Domain</label>
+    <input type="text" id="keyword" placeholder="Contoh: eldorado.gg">
 
-h1{
-  text-align:center;
-  margin-top:0;
-}
+    <div class="options">
+      <label><input type="checkbox" id="useFilter" checked> Pakai filter domain/URL</label>
+      <label><input type="checkbox" id="removeDup" checked> Hapus duplikat hasil</label>
+    </div>
 
-.upload-btn{
-  display:block;
-  width:100%;
-  padding:20px;
-  border:none;
-  border-radius:14px;
+    <div class="buttons">
+      <button id="processBtn">Proses</button>
+      <button id="downloadBtn" disabled>Download Hasil</button>
+    </div>
+
+    <progress id="progress" value="0" max="100"></progress>
+
+    <div class="info" id="info">Belum ada file.</div>
+
+    <p class="note">Versi fixed: JS dipisah ke file app.js, jadi tidak akan tampil sebagai teks di halaman.</p>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
   background:#2563eb;
   color:white;
   font-size:18px;
